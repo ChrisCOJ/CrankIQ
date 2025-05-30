@@ -21,16 +21,12 @@
  * This file contains mpu6050 functionality 
  *******************************************/
 
-void mpu_init(i2c_master_dev_handle_t dev_handle) {
-    // Wake up the MPU6050
-    mpu_reg_write_byte(dev_handle, MPU6050_PWR_MGMT1_REG, MPU6050_WAKE_UP_SIG);
-
-    // Configure the MPU6050 accelerometer to 2G sens
-    mpu_reg_write_byte(dev_handle, MPU6050_ACCEL_CONFIG_REG, MPU6050_ACCEL_2G);
-
-    // Configure the MPU6050 gyroscope to 250 degree sens
-    mpu_reg_write_byte(dev_handle, MPU6050_GYRO_CONFIG_REG, MPU6050_GYRO_250_DEG);
+esp_err_t mpu_reg_write_byte(i2c_master_dev_handle_t dev_handle, uint8_t reg_address, uint8_t data) {
+    // Sends the address of the register to be written to, then sends the actual data to be written.
+    uint8_t write_buf[2] = { reg_address, data };
+    return i2c_master_transmit(dev_handle, write_buf, sizeof(write_buf), I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
 }
+
 
 
 esp_err_t mpu_read_reg(i2c_master_dev_handle_t dev_handle, uint8_t reg_address, uint8_t *read_buffer, size_t read_buffer_size) {
@@ -42,11 +38,23 @@ esp_err_t mpu_read_reg(i2c_master_dev_handle_t dev_handle, uint8_t reg_address, 
 }
 
 
-esp_err_t mpu_reg_write_byte(i2c_master_dev_handle_t dev_handle, uint8_t reg_address, uint8_t data) {
-    // Sends the address of the register to be written to, then sends the actual data to be written.
+esp_err_t mpu_init(i2c_master_dev_handle_t dev_handle, uint8_t accel_accuracy, uint8_t gyro_accuracy) {
+    esp_err_t err;
+    // Wake up the MPU6050
+    err = mpu_reg_write_byte(dev_handle, MPU6050_PWR_MGMT1_REG, MPU6050_WAKE_UP_SIG);
+    if (err) return err;
+    // Configure the MPU6050 accelerometer
+    err = mpu_reg_write_byte(dev_handle, MPU6050_ACCEL_CONFIG_REG, accel_accuracy);
+    if (err) return err;
 
-    uint8_t write_buf[2] = { reg_address, data };
-    return i2c_master_transmit(dev_handle, write_buf, sizeof(write_buf), I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
+    // Configure the MPU6050 gyroscope
+    err = mpu_reg_write_byte(dev_handle, MPU6050_GYRO_CONFIG_REG, gyro_accuracy);
+    if (err) return err;
+
+    uint8_t read_buffer[1];
+    err = mpu_read_reg(dev_handle, MPU6050_GYRO_CONFIG_REG, read_buffer, 1);
+    ESP_LOGI(MPU_TAG, "GYRO CONFIG REG = 0x%02X", read_buffer[0]);
+    return err;
 }
 
 
@@ -74,14 +82,15 @@ int mpu_read_data(int data_type, i2c_master_dev_handle_t dev_handle, int16_t *re
             return -1;
     }
 
-    if (err == ESP_OK) {
-        int16_t x = ((data[0] << 8) | data[1]);
-        reader_arr[0] = x;
-        int16_t y = ((data[2] << 8) | data[3]);
-        reader_arr[1] = y;
-        int16_t z = ((data[4] << 8) | data[5]);
-        reader_arr[2] = z;
+    if (err != ESP_OK) {
+        return err;
     }
 
-    return 0;
+    int16_t x = ((data[0] << 8) | data[1]);
+    reader_arr[0] = x;
+    int16_t y = ((data[2] << 8) | data[3]);
+    reader_arr[1] = y;
+    int16_t z = ((data[4] << 8) | data[5]);
+    reader_arr[2] = z;
+    return ESP_OK;
 }

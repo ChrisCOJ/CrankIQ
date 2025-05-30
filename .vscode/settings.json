@@ -10,6 +10,7 @@
   },
   "files.associations": {
     "*.py": "python",
-    "mpu_i2c.h": "c"
+    "mpu_i2c.h": "c",
+    "event_groups.h": "c"
   }
 }
