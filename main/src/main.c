@@ -14,14 +14,15 @@
 #include "freertos/task.h"
 
 #include "../include/mpu_i2c.h"
+#include "../include/ble_server.h"
 
 
 #define I2C_SDA_IO              GPIO_NUM_22
 #define I2C_SCL_IO              GPIO_NUM_23
 #define FILTER_SAMPLE_SIZE      10
 
-#define DEAD_ZONE               1.f
-#define DETECTION_RANGE         0.2f
+#define DEAD_ZONE               0.8f
+#define DETECTION_RANGE         0.1f
 
 #define MAX_MPU_ACCEL_RANGE     16
 #define MAX_MPU_GYRO_RANGE      2000
@@ -85,9 +86,8 @@ int filter_arr(unsigned data_type, int16_t *arr, size_t arr_size, unsigned axis,
 }
 
 
-float get_gyro_drift(i2c_master_dev_handle_t dev_handle) {
+float get_gyro_drift(i2c_master_dev_handle_t dev_handle, int iterations) {
     /* On start, keep the IMU sensor still, read 100 gyro values and average them to get the drift */
-    int iterations = 100;
     int16_t arr[3];
     size_t arr_size = 3;
     float total = 0;
@@ -102,17 +102,16 @@ float get_gyro_drift(i2c_master_dev_handle_t dev_handle) {
 
 
 void app_main(void){
-    /* --- Variable defs --- */
+    /* --- Memory allocations --- */
     int16_t *z_gyro = calloc(FILTER_SAMPLE_SIZE, sizeof(int16_t));
     int16_t *y_accel = calloc(FILTER_SAMPLE_SIZE, sizeof(int16_t));
-    int filtered_gyro_z = 0;
-    double dt = 0;  // Elapsed time between gyro readings used to calculate angle
-    int64_t start = 0;
-    int64_t end = 0;
-    float angle = 0;
-    float filtered_accel_y = 0;
-    bool allow_count = false;    // Flag to stop duplicate cadence readings when the crank is stationary
-    int rotations = 0;
+
+    
+    /* --- Initialize bluetooth --- */
+    if (bt_init() != ESP_OK) {
+        ESP_LOGE(GATTS_TAG, "%s Failed to initialize bluetooth", __func__);
+        return;
+    }
 
     /* --- Open i2c channel for communication with mpu6050 --- */
     i2c_master_bus_handle_t mst_bus_handle;
@@ -140,11 +139,22 @@ void app_main(void){
     esp_err_t err = mpu_init(dev_handle, MPU6050_ACCEL_2G, MPU6050_GYRO_2000_DEG);
     if (err) return;
 
-    float gyro_z_offset = get_gyro_drift(dev_handle);  // Calculate gyro drift on start and subtract from further readings
+    /* --- Runtime Variables --- */
+    int filtered_gyro_z = 0;
+    double dt = 0;  // Elapsed time between gyro readings used to calculate angle
+    int64_t start = 0;
+    int64_t end = 0;
+    float angle = 0;
+    float filtered_accel_y = 0;
+    bool allow_count = false;  // Flag to stop duplicate cadence readings when the sensor is stationary
+    int rotations = 0;
 
-    // rotation_reference = the accelerometer y value at which a rotation should be counted.
+    /* Calculate gyro drift on start and subtract from further readings */
+    float gyro_z_offset = get_gyro_drift(dev_handle, 100);
+    /* rotation_reference = the accelerometer y value at which a rotation should be counted */
     float rotation_reference = read_initial_pos(y_accel, FILTER_SAMPLE_SIZE, dev_handle);
     rotation_reference /= MPU_2G_DIV;  // Convert raw value to Gs
+
     while (1) {
         /* --- Filter accel y values by averaging over a few readings --- */
         filtered_accel_y = filter_arr(MPU_ACCEL_DATA, y_accel, FILTER_SAMPLE_SIZE, Y_AXIS, dev_handle);
