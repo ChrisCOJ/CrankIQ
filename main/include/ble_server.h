@@ -36,7 +36,16 @@ enum crankiq_profile {
 };
 
 
-esp_err_t bt_init();
+typedef struct {
+    uint16_t conn_id;
+    esp_gatt_if_t gatts_if;
+    uint16_t handle_table[PROFILE_LEN];
+    size_t handle_table_size;
+    esp_err_t ret;
+} bt_conn_properties;
+
+
+bt_conn_properties bt_init();
 
 
 

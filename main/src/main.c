@@ -101,6 +101,32 @@ float get_gyro_drift(i2c_master_dev_handle_t dev_handle, int iterations) {
 }
 
 
+void notify_cadence(bt_conn_properties *bt_conn, int rotations) {
+    // /* --- Read the value of the cadence cccd --- */
+    // esp_gatt_rsp_t rsp;
+    // uint8_t cccd_val[2] = {0};
+    // esp_err_t err = esp_ble_gatts_get_attr_value(bt_conn->handle_table[IDX_CADENCE_CCCD_DESC], &rsp.attr_value.len, 
+    //                                              (const uint8_t **)&rsp.attr_value.value);
+    // if (err == ESP_OK && rsp.attr_value.len == 2) {
+    //     memcpy(cccd_val, rsp.attr_value.value, rsp.attr_value.len);
+    // } else {
+    //     ESP_LOGE(GATTS_TAG, "Error while trying to read cccd attribute. Err no: %d", err);
+    // }
+
+    // /* --- Send notification if cccd is set to 1 (subscribed) --- */
+    // ESP_LOGI(GATTS_TAG, "CCCD value = %d", cccd_val[0] & 0x01);
+    // if ((cccd_val[0] & 0x01) == 1) {
+    
+    // Send processed report notification to the BLE host
+    esp_err_t ret = esp_ble_gatts_send_indicate(bt_conn->gatts_if, bt_conn->conn_id, 
+                                                bt_conn->handle_table[IDX_CADENCE_CHAR_VAL],
+                                                sizeof(rotations), (uint8_t *)&rotations, false);
+    if (ret != ESP_OK) {
+        ESP_LOGE(GATTS_TAG, "Failed to send report! Error code %d", ret);
+    }
+}
+
+
 void app_main(void){
     /* --- Memory allocations --- */
     int16_t *z_gyro = calloc(FILTER_SAMPLE_SIZE, sizeof(int16_t));
@@ -108,7 +134,8 @@ void app_main(void){
 
     
     /* --- Initialize bluetooth --- */
-    if (bt_init() != ESP_OK) {
+    bt_conn_properties bt_conn = bt_init();
+    if (bt_conn.ret != ESP_OK) {
         ESP_LOGE(GATTS_TAG, "%s Failed to initialize bluetooth", __func__);
         return;
     }
@@ -172,7 +199,7 @@ void app_main(void){
         if (start) {
             dt = (double)(end - start) / 1e6;
             angle += filtered_gyro_z * dt;
-            ESP_LOGI(MPU_TAG, "Angle: %.2f", angle);
+            // ESP_LOGI(MPU_TAG, "Angle: %.2f", angle);
             rotations = abs((int)(angle / 360.f));
         }
          /* --- Filter gyro z values by averaging over a few readings --- */
@@ -201,6 +228,8 @@ void app_main(void){
                 allow_count = false;
             }
         }
+
+        notify_cadence(&bt_conn, rotations);
 
         // ESP_LOGI(MPU_TAG, "Z: %d", filtered_gyro_z);
         // ESP_LOGI(MPU_TAG, "ACCEL Y: %.2f", filtered_accel_y);

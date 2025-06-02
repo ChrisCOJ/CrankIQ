@@ -24,6 +24,9 @@ static const uint16_t GATT_CHAR_DECL_UUID = 0x2803;
 static const uint16_t GATT_CCCD_UUID = 0x2902;
 
 uint16_t crankiq_handle_table[PROFILE_LEN];
+volatile bool is_handle_table_set = false;
+
+bt_conn_properties bt_conn;
 
 /* LSB ------------------------------> MSB */
 uint8_t CADENCE_SERVICE_UUID[16] = {
@@ -37,15 +40,10 @@ uint8_t CADENCE_SENSOR_CHAR_UUID[16] = {
 };
 
 uint8_t cadence = 0;
-uint16_t cccd_value = 0;  // Default init. The client will later write to this to enable notifications
+uint16_t *cccd_value = {0};  // Default init. The client will later write to this to enable notifications
 
 /* --- Properties --- */
 esp_gatt_char_prop_t char_prop_notify = ESP_GATT_CHAR_PROP_BIT_NOTIFY;
-
-/* --- Connection variables */
-uint16_t conn_id;
-uint16_t gatts_if;
-
 
 /* --- GATTS Table --- */
 const esp_gatts_attr_db_t crankiq_gatts_db[PROFILE_LEN] = {
@@ -141,12 +139,8 @@ void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp
             }
             ESP_LOGI(GATTS_TAG, "%s -> Config scan response data successful! LINE %d", __func__, __LINE__);
 
-            ret = esp_ble_gatts_create_attr_tab(crankiq_gatts_db, gatts_if, PROFILE_LEN, CADENCE_SENSOR_SERVICE_INST);
-            if (ret != ESP_OK) {
-                ESP_LOGE(GATTS_TAG, "%s -> Error on line %d. Creating gatt atribute table failed! Error code: %d", __func__, __LINE__, ret);
-                return;
-            }
-            ESP_LOGI(GATTS_TAG, "%s -> Created gatt attribute table successfully! LINE %d", __func__, __LINE__);
+            esp_ble_gatts_create_attr_tab(crankiq_gatts_db, gatts_if, PROFILE_LEN, CADENCE_SENSOR_SERVICE_INST);
+            bt_conn.gatts_if = gatts_if;  // Store the gatts interface for later use in the main program
             break;
             
         /* 
@@ -167,12 +161,13 @@ void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp
             else {
                 ESP_LOGI(GATTS_TAG, "create attribute table successfully, the number of handles = %d", param->add_attr_tab.num_handle);
 
-                memcpy(crankiq_handle_table, param->add_attr_tab.handles, sizeof(crankiq_handle_table));
-                ESP_LOGI(GATTS_TAG, "CrankIQ handle table: ");
-                for (int i = 0; i < param->add_attr_tab.num_handle; ++i) {
-                    ESP_LOGI(GATTS_TAG, "%d", crankiq_handle_table[i]);
-                }
+                memcpy(crankiq_handle_table, param->add_attr_tab.handles, PROFILE_LEN * sizeof(uint16_t));
+                memcpy(bt_conn.handle_table, param->add_attr_tab.handles, PROFILE_LEN * sizeof(uint16_t));
+                bt_conn.handle_table_size = sizeof(crankiq_handle_table);
+                is_handle_table_set = true;
+
                 esp_ble_gatts_start_service(crankiq_handle_table[IDX_CADENCE_SENSOR_SERVICE]);
+                
             }
             break;
 
@@ -190,8 +185,8 @@ void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp
         }
 
         case ESP_GATTS_CONNECT_EVT: {
-            // Store connection id
-            conn_id = param->connect.conn_id;
+            // Store conn_id for later use in the main program            
+            bt_conn.conn_id = param->connect.conn_id;
 
             // Update connection parameters
             esp_ble_conn_update_params_t conn_params = {0};
@@ -281,7 +276,7 @@ void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *par
 }
 
 
-esp_err_t bt_init() {
+bt_conn_properties bt_init() {
     esp_err_t ret;
 
     // Initialize non-volatile storage to store non-volataile bluetooth data
@@ -297,47 +292,54 @@ esp_err_t bt_init() {
     esp_bt_controller_config_t bt_config = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
     ret = esp_bt_controller_init(&bt_config);
     if (ret != ESP_OK) {
+        bt_conn.ret = ret;
         ESP_LOGE(GATTS_TAG, "%s failed to initialize bluetooth controller", __func__);
-        return ret;
+        return bt_conn;
     }
 
     esp_bt_controller_disable();
     ret = esp_bt_controller_enable(ESP_BT_MODE_BLE);
     if (ret != ESP_OK) {
+        bt_conn.ret = ret;
         ESP_LOGE(GATTS_TAG, "%s failed to enable bluetooth controller", __func__);
-        return ret;
+        return bt_conn;
     }
 
     // Initialize and enable bluedroid bluetooth stack
     ret = esp_bluedroid_init();
     if (ret != ESP_OK) {
+        bt_conn.ret = ret;
         ESP_LOGE(GATTS_TAG, "%s failed to initialize bluedroid stack", __func__);
-        return ret;
+        return bt_conn;
     }
     ret = esp_bluedroid_enable();
     if (ret != ESP_OK) {
+        bt_conn.ret = ret;
         ESP_LOGE(GATTS_TAG, "%s failed to enable bluedroid stack", __func__);
-        return ret;
+        return bt_conn;
     }
 
     // Register callback functions (functions that perform logic in response to bluetooth events)
     ret = esp_ble_gatts_register_callback(gatts_event_handler);
     if (ret != ESP_OK){
+        bt_conn.ret = ret;
         ESP_LOGE(GATTS_TAG, "gatts register error, error code = %x", ret);
-        return ret;
+        return bt_conn;
     }
 
     ret = esp_ble_gap_register_callback(gap_event_handler);
     if (ret != ESP_OK){
+        bt_conn.ret = ret;
         ESP_LOGE(GATTS_TAG, "gap register error, error code = %x", ret); 
-        return ret;
+        return bt_conn;
     }
 
     // Register gatts profile
     ret = esp_ble_gatts_app_register(CRANKIQ_APP_ID);
     if (ret != ESP_OK){
+        bt_conn.ret = ret;
         ESP_LOGE(GATTS_TAG, "gatts app register error, error code = %x", ret);
-        return ret;
+        return bt_conn;
     }
 
     // ****************** Enable security ******************
@@ -357,7 +359,12 @@ esp_err_t bt_init() {
     esp_ble_gap_set_security_param(ESP_BLE_SM_SET_INIT_KEY, &init_key, sizeof(uint8_t));
     esp_ble_gap_set_security_param(ESP_BLE_SM_SET_RSP_KEY, &rsp_key, sizeof(uint8_t));
     // ******************************************************
+    
+    while (!is_handle_table_set) {
+        vTaskDelay(10);
+    }
 
-    return ESP_OK;
+    bt_conn.ret = ESP_OK;
+    return bt_conn;
 }
 

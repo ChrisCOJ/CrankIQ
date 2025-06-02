@@ -12,6 +12,7 @@
     "*.py": "python",
     "mpu_i2c.h": "c",
     "event_groups.h": "c",
-    "cstdint": "cpp"
+    "cstdint": "cpp",
+    "*.inc": "c"
   }
 }
