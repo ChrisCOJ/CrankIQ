@@ -24,12 +24,18 @@ static const uint16_t GATT_CHAR_DECL_UUID = 0x2803;
 static const uint16_t GATT_CCCD_UUID = 0x2902;
 
 uint16_t crankiq_handle_table[PROFILE_LEN];
-volatile bool is_handle_table_set = false;
+static volatile bool is_handle_table_set = false;
 
 bt_conn_properties bt_conn;
 
+uint8_t speed = 0;
+uint8_t cadence = 0;
+uint16_t *cccd_value = {0};  // Default init. The client will later write to this to enable notifications
+static bool cadence_cccd_flag = false;
+static bool speed_cccd_flag = false;
+
 /* LSB ------------------------------> MSB */
-uint8_t CADENCE_SERVICE_UUID[16] = {
+uint8_t CRANKIQ_SERVICE_UUID[16] = {
     0x34, 0x90, 0x15, 0x6b, 0xbb, 0x3e, 0x4d, 0x96, 
     0x96, 0xd3, 0x11, 0x42, 0x6d, 0xe5, 0xc5, 0x20
 };
@@ -39,18 +45,21 @@ uint8_t CADENCE_SENSOR_CHAR_UUID[16] = {
     0x96, 0xd3, 0x11, 0x42, 0x6d, 0xe5, 0xc5, 0x20
 };
 
-uint8_t cadence = 0;
-uint16_t *cccd_value = {0};  // Default init. The client will later write to this to enable notifications
+uint8_t SPEED_KMH_CHAR_UUID[16] = {
+    0x34, 0x92, 0x15, 0x6b, 0xbb, 0x3e, 0x4d, 0x96, 
+    0x96, 0xd3, 0x11, 0x42, 0x6d, 0xe5, 0xc5, 0x20
+};
 
 /* --- Properties --- */
 esp_gatt_char_prop_t char_prop_notify = ESP_GATT_CHAR_PROP_BIT_NOTIFY;
 
 /* --- GATTS Table --- */
 const esp_gatts_attr_db_t crankiq_gatts_db[PROFILE_LEN] = {
-    [IDX_CADENCE_SENSOR_SERVICE] = {
+    /* --- Cadence Service --- */
+    [IDX_CRANKIQ_SENSOR_SERVICE] = {
         {ESP_GATT_AUTO_RSP},
         {ESP_UUID_LEN_16, (uint8_t *)&GATT_SERVICE_DECL_UUID, ESP_GATT_PERM_READ, 
-         sizeof(CADENCE_SERVICE_UUID), sizeof(CADENCE_SERVICE_UUID), CADENCE_SERVICE_UUID}
+         sizeof(CRANKIQ_SERVICE_UUID), sizeof(CRANKIQ_SERVICE_UUID), CRANKIQ_SERVICE_UUID}
     },
 
     [IDX_CADENCE_CHAR_DECL] = {
@@ -68,6 +77,22 @@ const esp_gatts_attr_db_t crankiq_gatts_db[PROFILE_LEN] = {
         {ESP_UUID_LEN_16, (uint8_t *)&GATT_CCCD_UUID, ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
          sizeof(uint16_t), sizeof(uint16_t), (uint8_t *)&cccd_value}
     },
+
+    [IDX_SPEED_KMH_CHAR_DECL] = {
+        {ESP_GATT_AUTO_RSP},
+        {ESP_UUID_LEN_16, (uint8_t *)&GATT_CHAR_DECL_UUID, ESP_GATT_PERM_READ,
+         GATT_CHAR_DECL_SIZE, GATT_CHAR_DECL_SIZE, (uint8_t *)&char_prop_notify}
+    },
+    [IDX_SPEED_KMH_CHAR_VAL] = {
+        {ESP_GATT_AUTO_RSP},
+        {ESP_UUID_LEN_128, SPEED_KMH_CHAR_UUID, ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
+         sizeof(speed), sizeof(speed), &speed}
+    },
+    [IDX_SPEED_CCCD_DESC] = {
+        {ESP_GATT_AUTO_RSP},
+        {ESP_UUID_LEN_16, (uint8_t *)&GATT_CCCD_UUID, ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
+         sizeof(uint16_t), sizeof(uint16_t), (uint8_t *)&cccd_value}
+    },
 };
 
 static esp_ble_adv_data_t adv_data = {
@@ -81,8 +106,8 @@ static esp_ble_adv_data_t adv_data = {
     .p_manufacturer_data =  NULL,
     .service_data_len = 0,
     .p_service_data = NULL,
-    .service_uuid_len = sizeof(CADENCE_SERVICE_UUID),
-    .p_service_uuid = CADENCE_SERVICE_UUID,
+    .service_uuid_len = sizeof(CRANKIQ_SERVICE_UUID),
+    .p_service_uuid = CRANKIQ_SERVICE_UUID,
     .flag = (ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT),
 };
 
@@ -107,6 +132,11 @@ static esp_ble_adv_params_t adv_params = {
     .channel_map = ADV_CHNL_ALL,
     .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
 };
+
+
+bool get_cadence_cccd() {
+    return cadence_cccd_flag;
+}
 
 
 void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param) {
@@ -166,7 +196,7 @@ void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp
                 bt_conn.handle_table_size = sizeof(crankiq_handle_table);
                 is_handle_table_set = true;
 
-                esp_ble_gatts_start_service(crankiq_handle_table[IDX_CADENCE_SENSOR_SERVICE]);
+                esp_ble_gatts_start_service(crankiq_handle_table[IDX_CRANKIQ_SENSOR_SERVICE]);
                 
             }
             break;
@@ -175,10 +205,12 @@ void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp
             if (param->write.handle == crankiq_handle_table[IDX_CADENCE_CCCD_DESC] && param->write.len == 2) {
                 // Read the written cccd value to check what messages the client has subscribed for.
                 uint16_t read_cccd_val = param->write.value[0] | param->write.value[1] << 8;
+                cadence_cccd_flag = false;
                 if (read_cccd_val != CCCD_ENABLE) {
                     ESP_LOGW(GATTS_TAG, "Disabled cadence notifications!");
                     break;
                 }
+                cadence_cccd_flag = true;
                 ESP_LOGI(GATTS_TAG, "Subscribed to cadence notifications!");
             }
             break;

@@ -19,15 +19,16 @@ enum service_numbers {
 
 /* --- Cadence sensor BLE table enums --- */
 enum crankiq_profile {
-    /* --- Cadence Sensor custom service --- */
-    IDX_CADENCE_SENSOR_SERVICE,
+    /* --- CrankIQ Sensor custom service --- */
+    IDX_CRANKIQ_SENSOR_SERVICE,
 
     IDX_CADENCE_CHAR_DECL,
     IDX_CADENCE_CHAR_VAL,
     IDX_CADENCE_CCCD_DESC,
 
-    /* --- Battery Service --- */
-    IDX_BATTERY_SERVICE,
+    IDX_SPEED_KMH_CHAR_DECL,
+    IDX_SPEED_KMH_CHAR_VAL,
+    IDX_SPEED_CCCD_DESC,
 
     IDX_BATTERY_LEVEL_CHAR_DECL,
     IDX_BATTERY_LEVEL_CHAR_VAL,
@@ -46,6 +47,7 @@ typedef struct {
 
 
 bt_conn_properties bt_init();
+bool get_cadence_cccd();
 
 
 

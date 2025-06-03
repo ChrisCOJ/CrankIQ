@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <math.h>
 
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
@@ -17,15 +18,17 @@
 #include "../include/ble_server.h"
 
 
-#define I2C_SDA_IO              GPIO_NUM_22
-#define I2C_SCL_IO              GPIO_NUM_23
-#define FILTER_SAMPLE_SIZE      10
+#define I2C_SDA_IO                      GPIO_NUM_22
+#define I2C_SCL_IO                      GPIO_NUM_23
+#define FILTER_SAMPLE_SIZE              10
 
-#define DEAD_ZONE               0.8f
-#define DETECTION_RANGE         0.1f
+#define DEAD_ZONE                       0.8f
+#define DETECTION_RANGE                 0.1f
 
-#define MAX_MPU_ACCEL_RANGE     16
-#define MAX_MPU_GYRO_RANGE      2000
+#define MAX_MPU_ACCEL_RANGE             16
+#define MAX_MPU_GYRO_RANGE              2000
+
+#define CADENCE_ROLLING_AVERAGE_SIZE    60
 
 enum axis {
     X_AXIS,
@@ -39,30 +42,39 @@ enum error_codes {
 };
 
 
-int mean(int16_t *data_arr, size_t data_arr_len) {
-    int total = 0;
+float mean(int16_t *data_arr, size_t data_arr_len) {
+    float total = 0;
     for (int i = 0; i < data_arr_len; ++i) {
         total += data_arr[i];
     }
-    return (total / (int)data_arr_len);
+    return (total / (float)data_arr_len);
 }
 
 
-int read_initial_pos(int16_t *y_accel, size_t y_accel_size, i2c_master_dev_handle_t dev_handle) {
-    int16_t raw_data[3];
-    // Filter large values and small fluctuation in the raw data by averaging it out over a few readings
-    for (int count = 0; count < y_accel_size; ++count) {
-        if (mpu_read_data(MPU_ACCEL_DATA, dev_handle, raw_data, (sizeof(raw_data) / sizeof(int16_t)) ) ) {
-            ESP_LOGE(MPU_TAG, "%s", "Failed to read MPU data!");
-        }
-        y_accel[count] = raw_data[1];
+float mean_cadence(float *data_arr, size_t data_arr_len) {
+    float total = 0;
+    for (int i = 0; i < data_arr_len; ++i) {
+        total += data_arr[i];
     }
-    // On sensor wake up, read the first average y accelerometer value
-    return mean(y_accel, y_accel_size);
+    return (total / (float)data_arr_len);
 }
 
 
-int filter_arr(unsigned data_type, int16_t *arr, size_t arr_size, unsigned axis, i2c_master_dev_handle_t dev_handle) {
+// float read_initial_pos(int16_t *y_accel, size_t y_accel_size, i2c_master_dev_handle_t dev_handle) {
+//     int16_t raw_data[3];
+//     // Filter large values and small fluctuation in the raw data by averaging it out over a few readings
+//     for (int count = 0; count < y_accel_size; ++count) {
+//         if (mpu_read_data(MPU_ACCEL_DATA, dev_handle, raw_data, (sizeof(raw_data) / sizeof(int16_t)) ) ) {
+//             ESP_LOGE(MPU_TAG, "%s", "Failed to read MPU data!");
+//         }
+//         y_accel[count] = raw_data[1];
+//     }
+//     // On sensor wake up, read the first average y accelerometer value
+//     return mean(y_accel, y_accel_size);
+// }
+
+
+float filter_arr(unsigned data_type, int16_t *arr, size_t arr_size, unsigned axis, i2c_master_dev_handle_t dev_handle) {
     int16_t raw_data[3];
 
     if (mpu_read_data(data_type, dev_handle, raw_data, (sizeof(raw_data) / sizeof(int16_t)) ) ) {
@@ -95,43 +107,38 @@ float get_gyro_drift(i2c_master_dev_handle_t dev_handle, int iterations) {
         mpu_read_data(MPU_GYRO_DATA, dev_handle, arr, arr_size);
         total += arr[2];  // Z axis
     }
-    total /= MPU_2000_DEG_DIV;  // Convert to deg/sec
+    total /= iterations;  // Average
 
-    return total / iterations;
+    return total / MPU_2000_DEG_DIV;  // Convert to deg/sec
 }
 
 
-void notify_cadence(bt_conn_properties *bt_conn, int rotations) {
-    // /* --- Read the value of the cadence cccd --- */
-    // esp_gatt_rsp_t rsp;
-    // uint8_t cccd_val[2] = {0};
-    // esp_err_t err = esp_ble_gatts_get_attr_value(bt_conn->handle_table[IDX_CADENCE_CCCD_DESC], &rsp.attr_value.len, 
-    //                                              (const uint8_t **)&rsp.attr_value.value);
-    // if (err == ESP_OK && rsp.attr_value.len == 2) {
-    //     memcpy(cccd_val, rsp.attr_value.value, rsp.attr_value.len);
-    // } else {
-    //     ESP_LOGE(GATTS_TAG, "Error while trying to read cccd attribute. Err no: %d", err);
-    // }
+float calc_momentary_cadence(double dt, float rotation_rate) {
+    /*
+    dt = time interval in seconds
+    rotation_rate = degrees moved within dt seconds
+    */
+    return (1 / dt) * 60;
+}
 
-    // /* --- Send notification if cccd is set to 1 (subscribed) --- */
-    // ESP_LOGI(GATTS_TAG, "CCCD value = %d", cccd_val[0] & 0x01);
-    // if ((cccd_val[0] & 0x01) == 1) {
-    
-    // Send processed report notification to the BLE host
-    esp_err_t ret = esp_ble_gatts_send_indicate(bt_conn->gatts_if, bt_conn->conn_id, 
-                                                bt_conn->handle_table[IDX_CADENCE_CHAR_VAL],
-                                                sizeof(rotations), (uint8_t *)&rotations, false);
-    if (ret != ESP_OK) {
-        ESP_LOGE(GATTS_TAG, "Failed to send report! Error code %d", ret);
+
+void notify_cadence(bt_conn_properties *bt_conn, uint8_t cadence) {
+    /* --- Check if the client subscribed to cadence notifications --- */
+    if (!get_cadence_cccd()) {
+        return;
     }
+    /* --- Send cadence data notification to the BLE client --- */
+    esp_ble_gatts_send_indicate(bt_conn->gatts_if, bt_conn->conn_id, 
+                                bt_conn->handle_table[IDX_CADENCE_CHAR_VAL],
+                                sizeof(cadence), &cadence, false);
 }
 
 
 void app_main(void){
     /* --- Memory allocations --- */
     int16_t *z_gyro = calloc(FILTER_SAMPLE_SIZE, sizeof(int16_t));
-    int16_t *y_accel = calloc(FILTER_SAMPLE_SIZE, sizeof(int16_t));
-
+    float *cadence_arr = calloc(CADENCE_ROLLING_AVERAGE_SIZE, sizeof(float));
+    // int16_t *y_accel = calloc(FILTER_SAMPLE_SIZE, sizeof(int16_t));
     
     /* --- Initialize bluetooth --- */
     bt_conn_properties bt_conn = bt_init();
@@ -165,74 +172,103 @@ void app_main(void){
     /* --- Initialize mpu with appropriate accelerometer and gyro sensitivities --- */
     esp_err_t err = mpu_init(dev_handle, MPU6050_ACCEL_2G, MPU6050_GYRO_2000_DEG);
     if (err) return;
+    vTaskDelay(200 / portTICK_PERIOD_MS);
 
     /* --- Runtime Variables --- */
-    int filtered_gyro_z = 0;
+    float filtered_gyro_z = 0;
     double dt = 0;  // Elapsed time between gyro readings used to calculate angle
     int64_t start = 0;
     int64_t end = 0;
     float angle = 0;
-    float filtered_accel_y = 0;
-    bool allow_count = false;  // Flag to stop duplicate cadence readings when the sensor is stationary
+    // float filtered_accel_y = 0;
+    // bool allow_count = false;  // Flag to stop duplicate cadence readings when the sensor is stationary
     int rotations = 0;
+    double rotation_dt = 0;
+    bool full_rotation = false;
+    uint8_t cadence_rolling_average_val = 0;
+    int cadence_rolling_average_idx = 0;
 
     /* Calculate gyro drift on start and subtract from further readings */
     float gyro_z_offset = get_gyro_drift(dev_handle, 100);
-    /* rotation_reference = the accelerometer y value at which a rotation should be counted */
-    float rotation_reference = read_initial_pos(y_accel, FILTER_SAMPLE_SIZE, dev_handle);
-    rotation_reference /= MPU_2G_DIV;  // Convert raw value to Gs
+    // /* rotation_reference = the accelerometer y value at which a rotation should be counted */
+    // float rotation_reference = read_initial_pos(y_accel, FILTER_SAMPLE_SIZE, dev_handle);
+    // rotation_reference /= MPU_2G_DIV;  // Convert raw value to Gs
 
     while (1) {
-        /* --- Filter accel y values by averaging over a few readings --- */
-        filtered_accel_y = filter_arr(MPU_ACCEL_DATA, y_accel, FILTER_SAMPLE_SIZE, Y_AXIS, dev_handle);
-        if ((int)filtered_accel_y > MAX_MPU_RAW_VALUE) {   // Out of range return values correspond to error values.
-            int err = filtered_accel_y;
-            ESP_LOGE(MPU_TAG, "filter_arr() failed with error no %d", err);
-            // Cleanup
-            free(y_accel);
-            free(z_gyro);
-            return;
-        }
-        filtered_accel_y /= MPU_2G_DIV;  // Convert raw value to Gs
+        // /* --- Filter accel y values by averaging over a few readings --- */
+        // filtered_accel_y = filter_arr(MPU_ACCEL_DATA, y_accel, FILTER_SAMPLE_SIZE, Y_AXIS, dev_handle);
+        // if ((int)filtered_accel_y > MAX_MPU_RAW_VALUE) {   // Out of range return values correspond to error values.
+        //     int err = filtered_accel_y;
+        //     ESP_LOGE(MPU_TAG, "filter_arr() failed with error no %d", err);
+        //     // Cleanup
+        //     free(y_accel);
+        //     free(z_gyro);
+        //     return;
+        // }
+        // filtered_accel_y /= MPU_2G_DIV;  // Convert raw value to Gs
 
         end = esp_timer_get_time();
         if (start) {
             dt = (double)(end - start) / 1e6;
             angle += filtered_gyro_z * dt;
+            rotation_dt += dt;
             // ESP_LOGI(MPU_TAG, "Angle: %.2f", angle);
-            rotations = abs((int)(angle / 360.f));
+            // rotations = abs((int)(angle / 360.f));
+            if (angle >= 360.0f) {
+                ++rotations;
+                full_rotation = true;
+                angle -= 340.0f;
+            }
+            if (angle <= -360.0f) {
+                ++rotations;
+                full_rotation = true;
+                angle += 340.0f;
+            }
         }
          /* --- Filter gyro z values by averaging over a few readings --- */
         filtered_gyro_z = filter_arr(MPU_GYRO_DATA, z_gyro, FILTER_SAMPLE_SIZE, Z_AXIS, dev_handle);
         if (filtered_gyro_z > MAX_MPU_RAW_VALUE) {
             int err = filtered_gyro_z;
             ESP_LOGE(MPU_TAG, "filter_arr() failed with error no %d", err);
-            // Cleanup
-            free(y_accel);
-            free(z_gyro);
-            return;
+            continue;
         }
         filtered_gyro_z /= MPU_2000_DEG_DIV;  // Convert raw value to degrees/sec
         filtered_gyro_z -= gyro_z_offset;
+        // Add threshold that ignores small fluctuations (noise)
+        if (fabsf(filtered_gyro_z) < 0.1f) {
+            filtered_gyro_z = 0;
+        }
         start = esp_timer_get_time();
 
 
-        /* --- Dead zone to prevent multiple premature readings of crank rotations --- */
-        if ((filtered_accel_y > (rotation_reference + DEAD_ZONE)) || (filtered_accel_y < (rotation_reference - DEAD_ZONE))) {
-            allow_count = true;
-        }
-        /* --- Count rotations when the y accel value reaches the initial value (range) again --- */
-        if (allow_count) {
-            if ((filtered_accel_y >= rotation_reference) && (filtered_accel_y < (rotation_reference + DETECTION_RANGE))) {
-                ESP_LOGI(MPU_TAG, "%d", rotations);
-                allow_count = false;
+        // /* --- Dead zone to prevent multiple premature readings of crank rotations --- */
+        // if ((filtered_accel_y > (rotation_reference + DEAD_ZONE)) || (filtered_accel_y < (rotation_reference - DEAD_ZONE))) {
+        //     allow_count = true;
+        // }
+        // /* --- Count rotations when the y accel value reaches the initial value (range) again --- */
+        // if (allow_count) {
+        //     if ((filtered_accel_y >= rotation_reference) && (filtered_accel_y < (rotation_reference + DETECTION_RANGE))) {
+        //         ESP_LOGI(MPU_TAG, "%d", rotations);
+        //         allow_count = false;
+        //     }
+        // }
+
+        if (dt) {
+            // Calculate estimated cadence after every rotation and average over a few readings.
+            cadence_arr[cadence_rolling_average_idx] = (filtered_gyro_z / 360) * 60;
+            cadence_rolling_average_val = mean_cadence(cadence_arr, cadence_rolling_average_idx + 1);
+
+            if (cadence_rolling_average_idx < CADENCE_ROLLING_AVERAGE_SIZE - 1) {
+                ++cadence_rolling_average_idx;
+            } else {
+                /* Shift array left if filled to create a rolling average */
+                memmove(cadence_arr, cadence_arr + 1, (CADENCE_ROLLING_AVERAGE_SIZE - 1) * sizeof(float));
             }
+            // full_rotation = false;
+            // rotation_dt = 0;
+            notify_cadence(&bt_conn, cadence_rolling_average_val);
         }
 
-        notify_cadence(&bt_conn, rotations);
-
-        // ESP_LOGI(MPU_TAG, "Z: %d", filtered_gyro_z);
-        // ESP_LOGI(MPU_TAG, "ACCEL Y: %.2f", filtered_accel_y);
-        vTaskDelay(10 / portTICK_PERIOD_MS);
+        vTaskDelay(50 / portTICK_PERIOD_MS);
     }
 }
