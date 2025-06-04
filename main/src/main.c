@@ -21,9 +21,12 @@
 #define I2C_SDA_IO                      GPIO_NUM_22
 #define I2C_SCL_IO                      GPIO_NUM_23
 #define FILTER_SAMPLE_SIZE              10
+#define VARIANCE_SAMPLE_SIZE            500
+#define DRIFT_SAMPLE_SIZE               100
 
 #define DEAD_ZONE                       0.8f
 #define DETECTION_RANGE                 0.1f
+#define ACCEPTABLE_GYRO_VALUE           0.1f
 
 #define MAX_MPU_ACCEL_RANGE             16
 #define MAX_MPU_GYRO_RANGE              2000
@@ -42,83 +45,71 @@ enum error_codes {
 };
 
 
-float mean(int16_t *data_arr, size_t data_arr_len) {
-    float total = 0;
-    for (int i = 0; i < data_arr_len; ++i) {
-        total += data_arr[i];
-    }
-    return (total / (float)data_arr_len);
-}
-
-
-float mean_cadence(float *data_arr, size_t data_arr_len) {
-    float total = 0;
-    for (int i = 0; i < data_arr_len; ++i) {
-        total += data_arr[i];
-    }
-    return (total / (float)data_arr_len);
-}
-
-
-// float read_initial_pos(int16_t *y_accel, size_t y_accel_size, i2c_master_dev_handle_t dev_handle) {
-//     int16_t raw_data[3];
-//     // Filter large values and small fluctuation in the raw data by averaging it out over a few readings
-//     for (int count = 0; count < y_accel_size; ++count) {
-//         if (mpu_read_data(MPU_ACCEL_DATA, dev_handle, raw_data, (sizeof(raw_data) / sizeof(int16_t)) ) ) {
-//             ESP_LOGE(MPU_TAG, "%s", "Failed to read MPU data!");
-//         }
-//         y_accel[count] = raw_data[1];
+// float mean(int16_t *data_arr, size_t data_arr_len) {
+//     float total = 0;
+//     for (int i = 0; i < data_arr_len; ++i) {
+//         total += data_arr[i];
 //     }
-//     // On sensor wake up, read the first average y accelerometer value
-//     return mean(y_accel, y_accel_size);
+//     return (total / (float)data_arr_len);
 // }
 
 
-float filter_arr(unsigned data_type, int16_t *arr, size_t arr_size, unsigned axis, i2c_master_dev_handle_t dev_handle) {
-    int16_t raw_data[3];
+// float filter_arr(unsigned data_type, int16_t *arr, size_t arr_size, unsigned axis, i2c_master_dev_handle_t dev_handle) {
+//     int16_t raw_data[3];
 
-    if (mpu_read_data(data_type, dev_handle, raw_data, (sizeof(raw_data) / sizeof(int16_t)) ) ) {
-        ESP_LOGE(MPU_TAG, "%s", "Failed to read MPU data!");
-        return MPU_DATA_READ_FAIL;
-    }
-    if (axis > 2) {
-        ESP_LOGE(MPU_TAG, "axis parameter out of range");
-        return PARAMTER_OUT_OF_RANGE;
-    }
-    if (data_type > 1) {
-        ESP_LOGE(MPU_TAG, "data_type parameter out of range");
-        return PARAMTER_OUT_OF_RANGE;
-    }
-    /* Remove the first element of the raw data arr and shift left to make space for a new value */
-    memmove(arr, arr + 1, (arr_size - 1) * sizeof(int16_t));
-    arr[arr_size - 1] = raw_data[axis];
+//     if (mpu_read_data(data_type, dev_handle, raw_data, (sizeof(raw_data) / sizeof(int16_t)) ) ) {
+//         ESP_LOGE(MPU_TAG, "%s", "Failed to read MPU data!");
+//         return MPU_DATA_READ_FAIL;
+//     }
+//     if (axis > 2) {
+//         ESP_LOGE(MPU_TAG, "axis parameter out of range");
+//         return PARAMTER_OUT_OF_RANGE;
+//     }
+//     if (data_type > 1) {
+//         ESP_LOGE(MPU_TAG, "data_type parameter out of range");
+//         return PARAMTER_OUT_OF_RANGE;
+//     }
+//     /* Remove the first element of the raw data arr and shift left to make space for a new value */
+//     memmove(arr, arr + 1, (arr_size - 1) * sizeof(int16_t));
+//     arr[arr_size - 1] = raw_data[axis];
 
-    /* Get the mean value of the raw data arr */
-    return mean(arr, arr_size);
-}
+//     /* Get the mean value of the raw data arr */
+//     return mean(arr, arr_size);
+// }
 
 
-float get_gyro_drift(i2c_master_dev_handle_t dev_handle, int iterations) {
-    /* On start, keep the IMU sensor still, read 100 gyro values and average them to get the drift */
+float calc_gyro_z_drift(i2c_master_dev_handle_t dev_handle, int iterations) {
+    /**
+     * @brief Returns the stationary drift of the gyro z axis (in deg/sec)
+     * The sensor MUST be held still during start-up to get a reliable drift estimate
+     */
     int16_t arr[3];
-    size_t arr_size = 3;
-    float total = 0;
+    float mean = 0;
     for (int i = 0; i < iterations; ++i) {
-        mpu_read_data(MPU_GYRO_DATA, dev_handle, arr, arr_size);
-        total += arr[2];  // Z axis
+        mpu_read_data(MPU_GYRO_DATA, dev_handle, arr, sizeof(arr));
+        mean += arr[2];  // Z axis
     }
-    total /= iterations;  // Average
+    mean /= iterations;
 
-    return total / MPU_2000_DEG_DIV;  // Convert to deg/sec
+    return mean / MPU_2000_DEG_DIV;  // Convert to deg/sec
 }
 
 
-float calc_momentary_cadence(double dt, float rotation_rate) {
-    /*
-    dt = time interval in seconds
-    rotation_rate = degrees moved within dt seconds
-    */
-    return (1 / dt) * 60;
+float calc_gyro_z_variance(i2c_master_dev_handle_t dev_handle, int iterations, float drift) {
+    /**
+     * @brief Returns the calcualted variance of the gyro z axis over the specified iteration steps (in deg/sec)
+     */
+
+    int16_t arr[3];
+    float variance = 0;
+    for (int i = 0; i < iterations; ++i) {
+        mpu_read_data(MPU_GYRO_DATA, dev_handle, arr, sizeof(arr));
+        float z = arr[2] - drift;  // Account for initial gyro drift
+        variance += z * z;
+    }
+    variance /= iterations;
+
+    return variance / MPU_2000_DEG_DIV;  // Convert to deg/sec
 }
 
 
@@ -134,12 +125,7 @@ void notify_cadence(bt_conn_properties *bt_conn, uint8_t cadence) {
 }
 
 
-void app_main(void){
-    /* --- Memory allocations --- */
-    int16_t *z_gyro = calloc(FILTER_SAMPLE_SIZE, sizeof(int16_t));
-    float *cadence_arr = calloc(CADENCE_ROLLING_AVERAGE_SIZE, sizeof(float));
-    // int16_t *y_accel = calloc(FILTER_SAMPLE_SIZE, sizeof(int16_t));
-    
+void app_main(void){    
     /* --- Initialize bluetooth --- */
     bt_conn_properties bt_conn = bt_init();
     if (bt_conn.ret != ESP_OK) {
@@ -175,99 +161,73 @@ void app_main(void){
     vTaskDelay(200 / portTICK_PERIOD_MS);
 
     /* --- Runtime Variables --- */
-    float filtered_gyro_z = 0;
+    int16_t gyro_arr[3];
+    float gyro_z = 0;
     double dt = 0;  // Elapsed time between gyro readings used to calculate angle
+
+    double rotation_dt = 0;  // Elapsed time between full crank rotations
     int64_t start = 0;
     int64_t end = 0;
     float angle = 0;
-    // float filtered_accel_y = 0;
-    // bool allow_count = false;  // Flag to stop duplicate cadence readings when the sensor is stationary
-    int rotations = 0;
-    double rotation_dt = 0;
     bool full_rotation = false;
-    uint8_t cadence_rolling_average_val = 0;
-    int cadence_rolling_average_idx = 0;
 
-    /* Calculate gyro drift on start and subtract from further readings */
-    float gyro_z_offset = get_gyro_drift(dev_handle, 100);
-    // /* rotation_reference = the accelerometer y value at which a rotation should be counted */
-    // float rotation_reference = read_initial_pos(y_accel, FILTER_SAMPLE_SIZE, dev_handle);
-    // rotation_reference /= MPU_2G_DIV;  // Convert raw value to Gs
+    /* --- Kalman filter variables --- */
+    float estimated_gyro_z = 0.f;
+    float estimate_variance = 1.f;
+    float gyro_z_variance;
+    float system_variance = 0.1f;  // Predicted change in cadence after each reading (tunable)
+
+    /* Calculate stationary gyro drift on start and subtract from further readings */
+    float gyro_z_offset = calc_gyro_z_drift(dev_handle, DRIFT_SAMPLE_SIZE);
+
+    /* Calculate the variance of gyro readings */
+    gyro_z_variance = calc_gyro_z_variance(dev_handle, VARIANCE_SAMPLE_SIZE, gyro_z_offset);
 
     while (1) {
-        // /* --- Filter accel y values by averaging over a few readings --- */
-        // filtered_accel_y = filter_arr(MPU_ACCEL_DATA, y_accel, FILTER_SAMPLE_SIZE, Y_AXIS, dev_handle);
-        // if ((int)filtered_accel_y > MAX_MPU_RAW_VALUE) {   // Out of range return values correspond to error values.
-        //     int err = filtered_accel_y;
-        //     ESP_LOGE(MPU_TAG, "filter_arr() failed with error no %d", err);
-        //     // Cleanup
-        //     free(y_accel);
-        //     free(z_gyro);
-        //     return;
-        // }
-        // filtered_accel_y /= MPU_2G_DIV;  // Convert raw value to Gs
-
+        /* --- Read raw gyro data, convert to deg/sec, and use the time taken to integrate angle --- */
         end = esp_timer_get_time();
         if (start) {
             dt = (double)(end - start) / 1e6;
-            angle += filtered_gyro_z * dt;
+            angle += estimated_gyro_z * dt;
             rotation_dt += dt;
-            // ESP_LOGI(MPU_TAG, "Angle: %.2f", angle);
-            // rotations = abs((int)(angle / 360.f));
+            /* Reset angle on completed rotation */
             if (angle >= 360.0f) {
-                ++rotations;
                 full_rotation = true;
-                angle -= 340.0f;
+                angle -= 360.0f;
             }
             if (angle <= -360.0f) {
-                ++rotations;
                 full_rotation = true;
-                angle += 340.0f;
+                angle += 360.0f;
             }
         }
-         /* --- Filter gyro z values by averaging over a few readings --- */
-        filtered_gyro_z = filter_arr(MPU_GYRO_DATA, z_gyro, FILTER_SAMPLE_SIZE, Z_AXIS, dev_handle);
-        if (filtered_gyro_z > MAX_MPU_RAW_VALUE) {
-            int err = filtered_gyro_z;
-            ESP_LOGE(MPU_TAG, "filter_arr() failed with error no %d", err);
+
+        int err = mpu_read_data(MPU_GYRO_DATA, dev_handle, gyro_arr, sizeof(gyro_arr));
+        if (err) {
+            ESP_LOGE(MPU_TAG, "mpu_read_data() failed with err code %d", err);
             continue;
         }
-        filtered_gyro_z /= MPU_2000_DEG_DIV;  // Convert raw value to degrees/sec
-        filtered_gyro_z -= gyro_z_offset;
-        // Add threshold that ignores small fluctuations (noise)
-        if (fabsf(filtered_gyro_z) < 0.1f) {
-            filtered_gyro_z = 0;
+        gyro_z = (gyro_arr[2] / MPU_2000_DEG_DIV) - gyro_z_offset;  // Convert raw value to degrees/sec
+
+        /* Add threshold that ignores very small fluctuations */
+        if (fabsf(gyro_z) < ACCEPTABLE_GYRO_VALUE) {
+            gyro_z = 0;
         }
+
+        /* --- Apply kalman filter to smooth out data and reduce the impact of noise (e.g. vibrations) --- */
+        /* Predict estimate uncertainty */
+        estimate_variance += system_variance;
+
+        /* Update estimate */
+        float kalman_gain = estimate_variance / (estimate_variance + gyro_z_variance);
+        estimated_gyro_z = estimated_gyro_z + kalman_gain * (gyro_z - estimated_gyro_z);
+        estimate_variance = (1 - kalman_gain) * estimate_variance;
+
         start = esp_timer_get_time();
+        /*------------------------------------------------------------------------------------------*/
 
-
-        // /* --- Dead zone to prevent multiple premature readings of crank rotations --- */
-        // if ((filtered_accel_y > (rotation_reference + DEAD_ZONE)) || (filtered_accel_y < (rotation_reference - DEAD_ZONE))) {
-        //     allow_count = true;
-        // }
-        // /* --- Count rotations when the y accel value reaches the initial value (range) again --- */
-        // if (allow_count) {
-        //     if ((filtered_accel_y >= rotation_reference) && (filtered_accel_y < (rotation_reference + DETECTION_RANGE))) {
-        //         ESP_LOGI(MPU_TAG, "%d", rotations);
-        //         allow_count = false;
-        //     }
-        // }
-
-        if (dt) {
-            // Calculate estimated cadence after every rotation and average over a few readings.
-            cadence_arr[cadence_rolling_average_idx] = (filtered_gyro_z / 360) * 60;
-            cadence_rolling_average_val = mean_cadence(cadence_arr, cadence_rolling_average_idx + 1);
-
-            if (cadence_rolling_average_idx < CADENCE_ROLLING_AVERAGE_SIZE - 1) {
-                ++cadence_rolling_average_idx;
-            } else {
-                /* Shift array left if filled to create a rolling average */
-                memmove(cadence_arr, cadence_arr + 1, (CADENCE_ROLLING_AVERAGE_SIZE - 1) * sizeof(float));
-            }
-            // full_rotation = false;
-            // rotation_dt = 0;
-            notify_cadence(&bt_conn, cadence_rolling_average_val);
-        }
+        int cadence = fabsf((estimated_gyro_z / 360.f) * 60.f);
+        notify_cadence(&bt_conn, cadence);
+        // ESP_LOGI(MPU_TAG, "CADENCE = %d", cadence);
 
         vTaskDelay(50 / portTICK_PERIOD_MS);
     }
