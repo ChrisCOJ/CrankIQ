@@ -33,6 +33,9 @@
 
 #define CADENCE_ROLLING_AVERAGE_SIZE    60
 
+#define GEAR_RATIO                      1
+#define WHEEL_CIRCUMFERENCE             1   // in meteres
+
 enum axis {
     X_AXIS,
     Y_AXIS,
@@ -122,6 +125,17 @@ void notify_cadence(bt_conn_properties *bt_conn, uint8_t cadence) {
     esp_ble_gatts_send_indicate(bt_conn->gatts_if, bt_conn->conn_id, 
                                 bt_conn->handle_table[IDX_CADENCE_CHAR_VAL],
                                 sizeof(cadence), &cadence, false);
+}
+
+void notify_speed(bt_conn_properties *bt_conn, uint8_t speed) {
+    /* --- Check if the client subscribed to speed notifications --- */
+    if (!get_speed_cccd()) {
+        return;
+    }
+    /* --- Send speed data notification to the BLE client --- */
+    esp_ble_gatts_send_indicate(bt_conn->gatts_if, bt_conn->conn_id, 
+                                bt_conn->handle_table[IDX_SPEED_KMH_CHAR_VAL],
+                                sizeof(speed), &speed, false);
 }
 
 
@@ -227,6 +241,9 @@ void app_main(void){
 
         int cadence = fabsf((estimated_gyro_z / 360.f) * 60.f);
         notify_cadence(&bt_conn, cadence);
+
+        int speed = (cadence * GEAR_RATIO * WHEEL_CIRCUMFERENCE) * 60 / 1000;  // (... * 60 / 1000) to convert from meters/minute to kmh
+        notify_speed(&bt_conn, speed);
         // ESP_LOGI(MPU_TAG, "CADENCE = %d", cadence);
 
         vTaskDelay(50 / portTICK_PERIOD_MS);

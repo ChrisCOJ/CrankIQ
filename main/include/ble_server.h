@@ -47,7 +47,9 @@ typedef struct {
 
 
 bt_conn_properties bt_init();
+
 bool get_cadence_cccd();
+bool get_speed_cccd();
 
 
 

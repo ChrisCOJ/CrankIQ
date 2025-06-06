@@ -138,6 +138,10 @@ bool get_cadence_cccd() {
     return cadence_cccd_flag;
 }
 
+bool get_speed_cccd() {
+    return speed_cccd_flag;
+}
+
 
 void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param) {
     esp_err_t ret;
@@ -212,6 +216,18 @@ void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp
                 }
                 cadence_cccd_flag = true;
                 ESP_LOGI(GATTS_TAG, "Subscribed to cadence notifications!");
+
+            } 
+            else if (param->write.handle == crankiq_handle_table[IDX_SPEED_CCCD_DESC] && param->write.len == 2) {
+                // Read the written cccd value to check what messages the client has subscribed for.
+                uint16_t read_cccd_val = param->write.value[0] | param->write.value[1] << 8;
+                speed_cccd_flag = false;
+                if (read_cccd_val != CCCD_ENABLE) {
+                    ESP_LOGW(GATTS_TAG, "Disabled speed notifications!");
+                    break;
+                }
+                speed_cccd_flag = true;
+                ESP_LOGI(GATTS_TAG, "Subscribed to speed notifications!");
             }
             break;
         }
