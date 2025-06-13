@@ -33,8 +33,8 @@
 
 #define CADENCE_ROLLING_AVERAGE_SIZE    60
 
-#define GEAR_RATIO                      1
-#define WHEEL_CIRCUMFERENCE             1   // in meteres
+#define GEAR_RATIO                      2.875f
+#define WHEEL_CIRCUMFERENCE             2.1f     // in meteres
 
 enum axis {
     X_AXIS,

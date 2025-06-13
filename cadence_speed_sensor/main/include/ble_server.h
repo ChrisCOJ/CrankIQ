@@ -12,7 +12,7 @@
 
 
 enum service_numbers {
-    CADENCE_SENSOR_SERVICE_INST,
+    CRANKIQ_SENSOR_SERVICE_INST,
     BATTERY_SERVICE_INST    
 };            
 
@@ -29,9 +29,6 @@ enum crankiq_profile {
     IDX_SPEED_KMH_CHAR_DECL,
     IDX_SPEED_KMH_CHAR_VAL,
     IDX_SPEED_CCCD_DESC,
-
-    IDX_BATTERY_LEVEL_CHAR_DECL,
-    IDX_BATTERY_LEVEL_CHAR_VAL,
 
     PROFILE_LEN
 };

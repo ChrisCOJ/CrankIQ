@@ -173,7 +173,7 @@ void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp
             }
             ESP_LOGI(GATTS_TAG, "%s -> Config scan response data successful! LINE %d", __func__, __LINE__);
 
-            esp_ble_gatts_create_attr_tab(crankiq_gatts_db, gatts_if, PROFILE_LEN, CADENCE_SENSOR_SERVICE_INST);
+            esp_ble_gatts_create_attr_tab(crankiq_gatts_db, gatts_if, PROFILE_LEN, CRANKIQ_SENSOR_SERVICE_INST);
             bt_conn.gatts_if = gatts_if;  // Store the gatts interface for later use in the main program
             break;
             
