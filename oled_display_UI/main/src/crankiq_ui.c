@@ -1,4 +1,5 @@
-#include "i2c_master.h"
+#include "driver/i2c_master.h"
+
 #include "../include/i2c_display_utils.h"
 
 
@@ -24,12 +25,19 @@ void app_main() {
 
     i2c_device_config_t dev_config = {
         .dev_addr_length = I2C_ADDR_BIT_7,  // Sets address length of the slave device
-        .device_address = SSD1306_I2C_SLAVE_ADDR,
+        .device_address = SH1106_I2C_SLAVE_ADDR,
         .scl_speed_hz = I2C_SCL_CLK_HZ,
     };
     ESP_ERROR_CHECK(i2c_master_bus_add_device(mst_bus_handle, &dev_config, &dev_handle));
 
+
     
     /* --- Wake up display --- */
-    
+    display_init(dev_handle);
+
+    // Draw the base user interface
+    draw_text(dev_handle, "Speed: ...", 10, 2);
+    draw_text(dev_handle, "Cadence: ...", 10, 4);
+
+    // draw_bt_icon(dev_handle, 115, 1);
 }
