@@ -1,6 +1,7 @@
 #include "driver/i2c_master.h"
 
 #include "../include/i2c_display_utils.h"
+#include "../include/ble_client.h"
 
 
 #define DISPLAY_SDA_IO      22
@@ -30,7 +31,8 @@ void app_main() {
     };
     ESP_ERROR_CHECK(i2c_master_bus_add_device(mst_bus_handle, &dev_config, &dev_handle));
 
-
+    /* Start scanning for sensors */
+    bt_init();
     
     /* --- Wake up display --- */
     display_init(dev_handle);
