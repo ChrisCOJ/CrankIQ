@@ -128,6 +128,9 @@ esp_err_t send_command(i2c_master_dev_handle_t dev_handle, uint8_t command) {
 
 
 esp_err_t draw(i2c_master_dev_handle_t dev_handle, uint8_t *pixel_buf, size_t pixel_buf_len) {
+    if (pixel_buf_len > SH1106_COLUMNS) {
+        return DISPLAY_BOUNDARY_OUT_OF_RANGE;
+    }
     uint8_t write_buf[pixel_buf_len + 1];
     write_buf[0] = DATA_BYTE;
     memcpy(write_buf + 1, pixel_buf, pixel_buf_len);
@@ -137,14 +140,14 @@ esp_err_t draw(i2c_master_dev_handle_t dev_handle, uint8_t *pixel_buf, size_t pi
 
 
 int set_cursor(i2c_master_dev_handle_t dev_handle, uint8_t column, uint8_t page) {
-    if (column > 127) return -1;
-    if (page > 7) return -1;
+    if (column > 127) return DISPLAY_BOUNDARY_OUT_OF_RANGE;
+    if (page > 7) return DISPLAY_BOUNDARY_OUT_OF_RANGE;
 
     send_command(dev_handle, PAGE_START_ADDRESS | page);                            // Set the page start address
     send_command(dev_handle, COLUMN_LOWER_NIBBLE | (column & 0x0F));                // Extract the lower nibble of the column
     send_command(dev_handle, COLUMN_HIGHER_NIBBLE | ((column >> 4) & 0x0F));        // Extract the higher nibble of the column
 
-    return 0;
+    return OK;
 }
 
 
@@ -166,25 +169,30 @@ void display_init(i2c_master_dev_handle_t dev_handle) {
 
 
 int draw_text(i2c_master_dev_handle_t dev_handle, char *text, uint8_t x, uint8_t y) {
+    int status;
     int i = 0;
     while (text[i] != '\0') {
-        // Set the draw coordinates
-        if (set_cursor(dev_handle, x, y)) {
-            return 1;
-        }
+        // Set draw coordinates
+        status = set_cursor(dev_handle, x, y);
+        if (status) return status;
+        
         // Draw individual characters
-        draw(dev_handle, font5x7[(uint8_t)text[i] - 32], sizeof(font5x7[0]));
+        status = draw(dev_handle, font5x7[(uint8_t)text[i] - 32], sizeof(font5x7[0]));
+        if (status == -1) return GENERIC_ERR;
+        if (status) return status;
 
         // Increment x coordinate to make space for the new character to be drawn (if applicable)
-        if ((x + sizeof(font5x7[0]) + 1) > SH1106_COLUMNS) {
-            return 2;
-        }
         x += sizeof(font5x7[0]) + 1;
-
         ++i;
     }
+    return x;
+}
 
-    return 0;
+
+int draw_integer(i2c_master_dev_handle_t dev_handle, int num, uint8_t x, uint8_t y) {
+    char num_str[12]; // enough for 32-bit int, including negative sign and null
+    snprintf(num_str, sizeof(num_str), "%d", num);
+    return draw_text(dev_handle, num_str, x, y);
 }
 
 

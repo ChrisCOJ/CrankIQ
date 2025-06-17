@@ -37,9 +37,30 @@ void app_main() {
     /* --- Wake up display --- */
     display_init(dev_handle);
 
-    // Draw the base user interface
-    draw_text(dev_handle, "Speed: ...", 10, 2);
-    draw_text(dev_handle, "Cadence: ...", 10, 4);
+    /* Create user interface that allows users to connect to peripherals via bluetooth */
+    // ...
 
+    /* Show loading on connection attempt */
+    // ...
+
+    /* If connection unsuccessful, allow retry */
+    // ...
+
+    /* If connection successful, clear the screen and show data of interest */
+    float connection_alive = true;
+    // ...
+
+    // Draw the base user interface
+    int speed_next_col = draw_text(dev_handle, "Speed: ", 10, 2);
+    int cadence_next_col = draw_text(dev_handle, "Cadence: ", 10, 4);
+
+    /* --- Poll the ble sensor for cadence and speed values and update the user interface --- */
+    while (connection_alive) {
+        int next_col;
+        next_col = draw_integer(dev_handle, get_speed(), speed_next_col, 2);
+        draw_text(dev_handle, " km/h", next_col, 2);
+        next_col = draw_integer(dev_handle, get_cadence(), cadence_next_col, 4);
+        draw_text(dev_handle, " rpm", next_col, 4);
+    }
     // draw_bt_icon(dev_handle, 115, 1);
 }

@@ -18,6 +18,10 @@
 
 #define DISPLAY_APP_ID          1
 
+// We are interested to retrieve these value from the ble peripheral
+static uint8_t cadence = 0;
+static uint8_t speed = 0;
+
 static char *remote_device_name = "CrankIQ";
 static esp_gattc_char_elem_t *char_elem_result   = NULL;
 static esp_gattc_descr_elem_t *descr_elem_result = NULL;
@@ -49,6 +53,16 @@ static esp_ble_scan_params_t ble_scan_params = {
     .scan_interval          = 0x50,
     .scan_window            = 0x30
 };
+
+
+
+uint8_t get_speed() {
+    return speed;
+}
+
+uint8_t get_cadence() {
+    return cadence;
+}
 
 
 void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param) {
@@ -147,7 +161,10 @@ void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp
     case ESP_GATTC_SEARCH_RES_EVT: {
         ESP_LOGI(GATTC_TAG, "Service search result, conn_id = %x, is primary service %d", param->search_res.conn_id, param->search_res.is_primary);
         ESP_LOGI(GATTC_TAG, "start handle %d, end handle %d, current handle value %d", param->search_res.start_handle, param->search_res.end_handle, param->search_res.srvc_id.inst_id);
-        if (param->search_res.srvc_id.uuid.len == ESP_UUID_LEN_128 && param->search_res.srvc_id.uuid.uuid.uuid128 == CRANKIQ_SERVICE_UUID) {
+
+        /* Compare discovered service uuid with actual uuid and fetch characteristic handles if identical */
+        int found_service_uuid = memcmp(param->search_res.srvc_id.uuid.uuid.uuid128, CRANKIQ_SERVICE_UUID, ESP_UUID_LEN_128);
+        if (param->search_res.srvc_id.uuid.len == ESP_UUID_LEN_128 && found_service_uuid == 0) {
             ESP_LOGI(GATTC_TAG, "Service found");
             found_service = true;
             conn_parameters.service_start_handle = param->search_res.start_handle;
@@ -157,10 +174,17 @@ void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp
     }
 
     case ESP_GATTC_SEARCH_CMPL_EVT:
-        esp_bt_uuid_t filter_cadence_char_uuid = {
-            .len = ESP_UUID_LEN_128,
-        };
-        memcpy(filter_cadence_char_uuid.uuid.uuid128, CADENCE_SENSOR_CHAR_UUID, sizeof(CADENCE_SENSOR_CHAR_UUID));
+        /* Declare characteristic uuids we are interested in discovering and subscribing to */
+        // esp_bt_uuid_t filter_cadence_char_uuid = {
+        //     .len = ESP_UUID_LEN_128,
+        // };
+        // memcpy(filter_cadence_char_uuid.uuid.uuid128, CADENCE_SENSOR_CHAR_UUID, sizeof(CADENCE_SENSOR_CHAR_UUID));
+
+        // esp_bt_uuid_t filter_speed_char_uuid = {
+        //     .len = ESP_UUID_LEN_128,
+        // };
+        // memcpy(filter_speed_char_uuid.uuid.uuid128, SPEED_KMH_CHAR_UUID, sizeof(SPEED_KMH_CHAR_UUID));
+        /* -------------------------------------------------------------------------------- */
 
         if (param->search_cmpl.status != ESP_GATT_OK) {
             ESP_LOGE(GATTC_TAG, "Service search failed, status %x", param->search_cmpl.status);
@@ -182,18 +206,19 @@ void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp
             }
 
             if (count > 0) {
+                ESP_LOGI(GATTC_TAG, "The number of discovered characteristics = %d", count);
                 char_elem_result = (esp_gattc_char_elem_t *)malloc(sizeof(esp_gattc_char_elem_t) * count);
                 if (!char_elem_result){
                     ESP_LOGE(GATTC_TAG, "gattc no mem");
                     break;
                 } else {
-                    status = esp_ble_gattc_get_char_by_uuid(gattc_if,
-                                                            param->search_cmpl.conn_id,
-                                                            conn_parameters.service_start_handle,
-                                                            conn_parameters.service_end_handle,
-                                                            filter_cadence_char_uuid,
-                                                            char_elem_result,
-                                                            &count);
+                    status = esp_ble_gattc_get_all_char(gattc_if,
+                                                        param->search_cmpl.conn_id,
+                                                        conn_parameters.service_start_handle,
+                                                        conn_parameters.service_end_handle,
+                                                        char_elem_result,
+                                                        &count,
+                                                        0);
                     if (status != ESP_GATT_OK) {
                         ESP_LOGE(GATTC_TAG, "esp_ble_gattc_get_char_by_uuid error");
                         free(char_elem_result);
@@ -201,11 +226,17 @@ void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp
                         break;
                     }
 
+                    /* --- Find and store all characteristics that have the notification property --- */
+                    int notifiable_char_count = 0;
                     for (int i = 0; i < count; ++i) {
                         if (char_elem_result[i].properties & ESP_GATT_CHAR_PROP_BIT_NOTIFY) {
-                            conn_parameters.char_handles[i] = char_elem_result[i].char_handle;
-                            esp_ble_gattc_register_for_notify(gattc_if, conn_parameters.remote_bda, char_elem_result[i].char_handle);
+                            ++notifiable_char_count;
+                            conn_parameters.notifiable_char_handles[i] = char_elem_result[i].char_handle;
                         }
+                    }
+                    /* --- Register for notify to all characteristics that have notifications enabled --- */
+                    for (int i = 0; i < notifiable_char_count; ++i) {
+                        esp_ble_gattc_register_for_notify(gattc_if, conn_parameters.remote_bda, conn_parameters.notifiable_char_handles[i]);
                     }
                 }
                 /* free char_elem_result */
@@ -213,6 +244,8 @@ void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp
             } else {
                 ESP_LOGE(GATTC_TAG, "no char found");
             }
+        } else {
+            ESP_LOGW(GATTC_TAG, "Desired service not found!");
         }
     break;
 
@@ -228,12 +261,12 @@ void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp
             uint16_t count = 0;
             uint16_t notify_enable = 1;
 
-            for (int i = 0; i < sizeof(conn_parameters.char_handles) / sizeof(uint16_t); ++i) {
+            for (int i = 0; i < sizeof(conn_parameters.notifiable_char_handles) / sizeof(uint16_t); ++i) {
                 esp_gatt_status_t ret_status = esp_ble_gattc_get_attr_count(gattc_if, conn_parameters.conn_id,
                                                                             ESP_GATT_DB_DESCRIPTOR,
                                                                             conn_parameters.service_start_handle,
                                                                             conn_parameters.service_end_handle,
-                                                                            conn_parameters.char_handles[i], &count);
+                                                                            conn_parameters.notifiable_char_handles[i], &count);
                 if (ret_status != ESP_GATT_OK) {
                     ESP_LOGE(GATTC_TAG, "esp_ble_gattc_get_attr_count error");
                 }
@@ -254,7 +287,9 @@ void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp
                         }
 
                         /* Every char has only one descriptor */
-                        if (count > 0 && descr_elem_result[0].uuid.len == ESP_UUID_LEN_16 && descr_elem_result[0].uuid.uuid.uuid16 == ESP_GATT_UUID_CHAR_CLIENT_CONFIG) {
+                        if (count > 0 && descr_elem_result[0].uuid.len == ESP_UUID_LEN_16 && 
+                            descr_elem_result[0].uuid.uuid.uuid16 == ESP_GATT_UUID_CHAR_CLIENT_CONFIG) {
+
                             ret_status = esp_ble_gattc_write_char_descr(gattc_if,
                                                                         conn_parameters.conn_id,
                                                                         descr_elem_result[0].handle,
@@ -279,11 +314,23 @@ void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp
         }
         break;
 
-        case ESP_GATTC_NOTIFY_EVT:
-            ESP_LOG_BUFFER_HEX(GATTC_TAG, param->notify.value, param->notify.value_len);
-
-        default:
+    case ESP_GATTC_NOTIFY_EVT:
+        if (param->notify.value_len != 1) {
+            ESP_LOGE(GATTC_TAG, "Invalid value sent");
             break;
+        }
+
+        if (param->notify.handle == conn_parameters.notifiable_char_handles[0]) {
+            cadence = param->notify.value[0];
+            ESP_LOGI("Cadence (rpm)", "%d", cadence);
+        } else {
+            speed = param->notify.value[0];
+            ESP_LOGI("Speed (kmh)", "%d", speed);
+        }
+        break;
+
+    default:
+        break;
     }    
 }
 
