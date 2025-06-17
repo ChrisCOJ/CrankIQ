@@ -316,16 +316,16 @@ void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp
 
     case ESP_GATTC_NOTIFY_EVT:
         if (param->notify.value_len != 1) {
-            ESP_LOGE(GATTC_TAG, "Invalid value sent");
+            // ESP_LOGE(GATTC_TAG, "Invalid value sent");
             break;
         }
 
         if (param->notify.handle == conn_parameters.notifiable_char_handles[0]) {
             cadence = param->notify.value[0];
-            ESP_LOGI("Cadence (rpm)", "%d", cadence);
+            // ESP_LOGI("Cadence (rpm)", "%d", cadence);
         } else {
             speed = param->notify.value[0];
-            ESP_LOGI("Speed (kmh)", "%d", speed);
+            // ESP_LOGI("Speed (kmh)", "%d", speed);
         }
         break;
 

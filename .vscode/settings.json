@@ -16,6 +16,7 @@
     "*.inc": "c",
     "i2c_display_utils.h": "c",
     "esp_gatt_common_api.h": "c",
-    "random": "c"
+    "random": "c",
+    "bitset": "c"
   }
 }
