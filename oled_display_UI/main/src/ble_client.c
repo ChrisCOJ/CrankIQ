@@ -65,6 +65,11 @@ uint8_t get_cadence() {
 }
 
 
+bool connection_established() {
+    return connect;
+}
+
+
 void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param) {
     uint8_t *adv_name = NULL;
     uint8_t adv_name_len = 0;
@@ -133,6 +138,7 @@ void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp
 
     case ESP_GATTC_CONNECT_EVT: {
         /* Store connection parameters for later use */
+        connect = true;
         ESP_LOGI(GATTC_TAG, "Connected, conn_id %d, remote "ESP_BD_ADDR_STR"", param->connect.conn_id,
                     ESP_BD_ADDR_HEX(param->connect.remote_bda));
         conn_parameters.conn_id = param->connect.conn_id;
@@ -327,6 +333,13 @@ void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp
             speed = param->notify.value[0];
             // ESP_LOGI("Speed (kmh)", "%d", speed);
         }
+        break;
+
+    case ESP_GATTC_DISCONNECT_EVT:
+        connect = false;
+        found_service = false;
+        uint32_t duration = 30;
+        esp_ble_gap_start_scanning(duration);
         break;
 
     default:

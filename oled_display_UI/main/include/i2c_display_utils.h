@@ -39,6 +39,7 @@ enum DISPLAY_ERR_CODES {
     DISPLAY_BOUNDARY_OUT_OF_RANGE,
 };
 
+
 extern const uint8_t bluetooth_icon[2][7];
 extern const uint8_t font5x7[][5];
 
@@ -139,16 +140,25 @@ int draw_integer(i2c_master_dev_handle_t dev_handle, int num, uint8_t x, uint8_t
 
 
 /**
-* @name draw_bt_icon(i2c_master_dev_handle_t dev_handle, uint8_t x, uint8_t y)
+* @name draw_bt_icon(i2c_master_dev_handle_t dev_handle)
 *
-* @brief Draws a Bluetooth icon at the specified (x, y) position using two rows of pixel data.
+* @brief Draws a Bluetooth icon using two rows of pixel data.
 *
 * @return void.
 * @param dev_handle The I2C handle of the display device.
-* @param x (AKA column) Horizontal start position of the icon's left corner.
-* @param y (AKA page) Vertical start page of the icon's top half (second half is drawn on y+1).
 */
-void draw_bt_icon(i2c_master_dev_handle_t dev_handle, uint8_t x, uint8_t y);
+void draw_bt_icon(i2c_master_dev_handle_t dev_handle);
+
+
+/**
+* @name clear_bt_icon(i2c_master_dev_handle_t dev_handle)
+*
+* @brief Clears the bluetooth icon only by setting its pixel values to 0.
+*
+* @return void.
+* @param dev_handle The I2C handle of the display device.
+*/
+void clear_bt_icon(i2c_master_dev_handle_t dev_handle);
 
 
 

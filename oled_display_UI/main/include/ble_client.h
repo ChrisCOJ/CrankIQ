@@ -65,4 +65,7 @@ uint8_t get_speed();
 uint8_t get_cadence();
 
 
+bool connection_established();
+
+
 #endif

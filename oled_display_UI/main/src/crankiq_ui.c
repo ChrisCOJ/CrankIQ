@@ -3,9 +3,16 @@
 #include "../include/i2c_display_utils.h"
 #include "../include/ble_client.h"
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+#include "esp_timer.h"
+
 
 #define DISPLAY_SDA_IO      22
 #define DISPLAY_SCL_IO      23
+
+#define SCAN_INTERVAL       30          // The time limit in seconds for scanning ble devices
 
 
 
@@ -41,13 +48,38 @@ void app_main() {
     // ...
 
     /* Show loading on connection attempt */
-    // ...
+    int64_t start = esp_timer_get_time();
+    double time_passed = 0;
+    while (!connection_established() && time_passed < SCAN_INTERVAL) {
+        draw_text(dev_handle, "Looking for", 30, 3);
+        draw_text(dev_handle, "bt device.", 30, 5);
+        vTaskDelay(300 / portTICK_PERIOD_MS);
+        draw_text(dev_handle, "Looking for", 30, 3);
+        draw_text(dev_handle, "bt device..", 30, 5);
+        vTaskDelay(300 / portTICK_PERIOD_MS);
+        draw_text(dev_handle, "Looking for", 30, 3);
+        draw_text(dev_handle, "bt device...", 30, 5);
+        vTaskDelay(300 / portTICK_PERIOD_MS);
+        time_passed = (double)(esp_timer_get_time() - start) / 1e6;
+        clear_screen(dev_handle);
+    }
 
     /* If connection unsuccessful, allow retry */
-    // ...
+    if (!connection_established()) {
+        draw_text(dev_handle, "Device not found!", 15, 2);
+        draw_text(dev_handle, "Press reset to try", 13, 4);
+        draw_text(dev_handle, "again!", 50, 6);
+        // while (1) {
+        //     vTaskDelay(10000 / portTICK_PERIOD_MS);
+        // }
+        return;
+    }
 
     /* If connection successful, clear the screen and show data of interest */
-    float connection_alive = true;
+    draw_text(dev_handle, "Connection established!", 10, 3);
+    vTaskDelay(2000 / portTICK_PERIOD_MS);
+    clear_screen(dev_handle);
+
     // ...
 
     // Draw the base user interface
@@ -55,7 +87,12 @@ void app_main() {
     int cadence_next_col = draw_text(dev_handle, "Cadence: ", 10, 4);
 
     /* --- Poll the ble sensor for cadence and speed values and update the user interface --- */
-    while (connection_alive) {
+    while (1) {
+        if (connection_established()) {
+            draw_bt_icon(dev_handle);
+        } else {
+            clear_bt_icon(dev_handle);
+        }
         int next_col;
         next_col = draw_integer(dev_handle, get_speed(), speed_next_col, 2);
         draw_text(dev_handle, " km/h", next_col, 2);

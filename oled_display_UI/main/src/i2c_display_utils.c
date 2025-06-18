@@ -14,6 +14,12 @@ const uint8_t bluetooth_icon[2][7] = {
 };
 
 
+const uint8_t bt_icon_clear[2][7] = {
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
+};
+
+
 const uint8_t font5x7[][5] = {
     {0x00,0x00,0x00,0x00,0x00}, // 32 ' '
     {0x00,0x00,0x5F,0x00,0x00}, // 33 '!'
@@ -91,7 +97,7 @@ const uint8_t font5x7[][5] = {
     {0x38,0x44,0x44,0x48,0x7F}, // 100 'd'
     {0x38,0x54,0x54,0x54,0x18}, // 101 'e'
     {0x08,0x7E,0x09,0x01,0x02}, // 102 'f'
-    {0x0C,0x52,0x52,0x52,0x3E}, // 103 'g'
+    {0x18,0xA4,0xA4,0xA4,0x7B}, // 103 'g'
     {0x7F,0x08,0x04,0x04,0x78}, // 104 'h'
     {0x00,0x44,0x7D,0x40,0x00}, // 105 'i'
     {0x20,0x40,0x44,0x3D,0x00}, // 106 'j'
@@ -196,13 +202,20 @@ int draw_integer(i2c_master_dev_handle_t dev_handle, int num, uint8_t x, uint8_t
 }
 
 
-void draw_bt_icon(i2c_master_dev_handle_t dev_handle, uint8_t x, uint8_t y) {
-    set_cursor(dev_handle, x, y);
+void draw_bt_icon(i2c_master_dev_handle_t dev_handle) {
+    set_cursor(dev_handle, 115, 1);
     draw(dev_handle, bluetooth_icon[0], sizeof(bluetooth_icon[0]));
-    set_cursor(dev_handle, x, y + 1);
+    set_cursor(dev_handle, 115, 2);
     draw(dev_handle, bluetooth_icon[1], sizeof(bluetooth_icon[1]));
 }
 
+
+void clear_bt_icon(i2c_master_dev_handle_t dev_handle) {
+    set_cursor(dev_handle, 115, 1);
+    draw(dev_handle, bt_icon_clear[0], sizeof(bt_icon_clear[0]));
+    set_cursor(dev_handle, 115, 2);
+    draw(dev_handle, bt_icon_clear[1], sizeof(bt_icon_clear[1]));
+}
 
 
 
