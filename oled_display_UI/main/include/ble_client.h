@@ -52,7 +52,7 @@ void bt_init();
 *
 * @return The speed value as an unsigned 8-bit integer.
 */
-uint8_t get_speed();
+uint8_t get_crankiq_speed();
 
 
 /**
@@ -62,9 +62,16 @@ uint8_t get_speed();
 *
 * @return The cadence value as an unsigned 8-bit integer.
 */
-uint8_t get_cadence();
+uint8_t get_crankiq_cadence();
 
 
+/**
+* @name connection_established()
+*
+* @brief Retrieves the most recent ble connection state between the display device and crankiq sensor.
+*
+* @return true if connection alive, false otherwise.
+*/
 bool connection_established();
 
 

@@ -69,20 +69,15 @@ void app_main() {
         draw_text(dev_handle, "Device not found!", 15, 2);
         draw_text(dev_handle, "Press reset to try", 13, 4);
         draw_text(dev_handle, "again!", 50, 6);
-        // while (1) {
-        //     vTaskDelay(10000 / portTICK_PERIOD_MS);
-        // }
         return;
     }
 
     /* If connection successful, clear the screen and show data of interest */
-    draw_text(dev_handle, "Connection established!", 10, 3);
+    draw_text(dev_handle, "Connected!", 35, 3);
     vTaskDelay(2000 / portTICK_PERIOD_MS);
     clear_screen(dev_handle);
 
-    // ...
-
-    // Draw the base user interface
+    // Draw the base user interface for the speed/cadence sensor
     int speed_next_col = draw_text(dev_handle, "Speed: ", 10, 2);
     int cadence_next_col = draw_text(dev_handle, "Cadence: ", 10, 4);
 
@@ -94,10 +89,9 @@ void app_main() {
             clear_bt_icon(dev_handle);
         }
         int next_col;
-        next_col = draw_integer(dev_handle, get_speed(), speed_next_col, 2);
+        next_col = draw_integer(dev_handle, get_crankiq_speed(), speed_next_col, 2);
         draw_text(dev_handle, " km/h", next_col, 2);
-        next_col = draw_integer(dev_handle, get_cadence(), cadence_next_col, 4);
+        next_col = draw_integer(dev_handle, get_crankiq_cadence(), cadence_next_col, 4);
         draw_text(dev_handle, " rpm", next_col, 4);
     }
-    // draw_bt_icon(dev_handle, 115, 1);
 }

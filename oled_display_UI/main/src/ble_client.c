@@ -56,11 +56,11 @@ static esp_ble_scan_params_t ble_scan_params = {
 
 
 
-uint8_t get_speed() {
+uint8_t get_crankiq_speed() {
     return speed;
 }
 
-uint8_t get_cadence() {
+uint8_t get_crankiq_cadence() {
     return cadence;
 }
 
